@@ -1,0 +1,3 @@
+#!/bin/bash
+echo "update worktree" | systemd-cat -p info -t morse
+git --work-tree=/home/pi/morse-deploy --git-dir=/home/pi/morse checkout -f main | systemd-cat -p info -t morse
