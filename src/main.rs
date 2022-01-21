@@ -20,9 +20,13 @@ struct Args {
     #[clap(short, long, default_value_t = 50)]
     duration: u32,
 
-    // port that the webservice listens on
+    /// port that the webservice listens on
     #[clap(short, long, default_value_t = 80)]
-    port: u16
+    port: u16,
+
+    /// GPIO pin number to blink output on (GPIO 14 == pin 8)
+    #[clap(long, default_value_t = 14)]
+    pin: u8,
 }
 
 
@@ -30,8 +34,7 @@ struct Args {
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     let gpio = Gpio::new()?;
-    let led_pin = 14; // GPIO 14 == pin 8
-    let mut pin = gpio.get(led_pin)?.into_output();
+    let mut pin = gpio.get(args.pin)?.into_output();
     pin.set_low();
     let pin = Arc::new(Mutex::new(pin));
     let dit_duration = args.duration;
@@ -72,7 +75,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .map(move |m: HashMap<String, String>| {
             println!("got {m:?}");
             let mut pin = pin.lock().unwrap();
-            let text = match m.get("text") {
+            match m.get("text") {
                 Some(t) => {
                     let enc = morse::encode(&t).unwrap();
                     let durations = morse::to_durations(enc);
