@@ -21,7 +21,7 @@ struct Args {
     duration: u32,
 
     // port that the webservice listens on
-    #[clap(short, long, default_value_t = 3030)]
+    #[clap(short, long, default_value_t = 80)]
     port: u16
 }
 
