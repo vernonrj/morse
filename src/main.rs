@@ -2,12 +2,8 @@ extern crate tokio;
 
 use std::collections::HashMap;
 use std::error::Error;
-use std::sync::{Arc, Mutex};
-use std::thread;
 
 use clap::Parser;
-#[cfg(unix)]
-use rppal::gpio::Gpio;
 use warp::Filter;
 use warp::http::{Response, StatusCode};
 
@@ -33,11 +29,6 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
-    let gpio = Gpio::new()?;
-    let mut pin = gpio.get(args.pin)?.into_output();
-    pin.set_low();
-    let pin = Arc::new(Mutex::new(pin));
-    let dit_duration = args.duration;
     
     let encode = warp::post()
         .and(warp::path("encode"))
@@ -69,35 +60,57 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         });
     
-    let blink = warp::post()
-        .and(warp::path("blink"))
-        .and(warp::body::form())
-        .map(move |m: HashMap<String, String>| {
-            println!("got {m:?}");
-            let mut pin = pin.lock().unwrap();
-            match m.get("text") {
-                Some(t) => {
-                    let enc = morse::encode(&t).unwrap();
-                    let durations = morse::to_durations(enc);
-                    for (pin_status, mut dur) in durations {
-                        if pin_status {
-                            pin.set_high();
-                        } else {
-                            pin.set_low();
+    #[cfg(unix)]
+    let blink = {
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+        use rppal::gpio::Gpio;
+
+        let gpio = Gpio::new()?;
+        let mut pin = gpio.get(args.pin)?.into_output();
+        pin.set_low();
+        let pin = Arc::new(Mutex::new(pin));
+        let dit_duration = args.duration;
+
+        warp::post()
+            .and(warp::path("blink"))
+            .and(warp::body::form())
+            .map(move |m: HashMap<String, String>| {
+                println!("got {m:?}");
+                let mut pin = pin.lock().unwrap();
+                match m.get("text") {
+                    Some(t) => {
+                        let enc = morse::encode(&t).unwrap();
+                        let durations = morse::to_durations(enc);
+                        for (pin_status, mut dur) in durations {
+                            if pin_status {
+                                pin.set_high();
+                            } else {
+                                pin.set_low();
+                            }
+                            dur /= 1000; // convert to ms
+                            dur *= dit_duration; // set the dit duration in ms
+                            thread::sleep(dur);
                         }
-                        dur /= 1000; // convert to ms
-                        dur *= dit_duration; // set the dit duration in ms
-                        thread::sleep(dur);
-                    }
-                    pin.set_low();
-                },
-                None => return Response::builder()
+                        pin.set_low();
+                    },
+                    None => return Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .body("no body to encode".into()),
+                };
+                Response::builder().body("success")
+            })
+    };
+    #[cfg(not(unix))]
+    let blink = warp::post()
+            .and(warp::path("blink"))
+            .and(warp::body::form())
+            .map(|m: HashMap<String, String>| {
+                println!("got {m:?}");
+                Response::builder()
                     .status(StatusCode::BAD_REQUEST)
-                    .body("no body to encode".into()),
-            };
-            Response::builder().body("success")
-        });
-    
+                    .body("not supported on this platform")
+            });
     
     warp::serve(encode.or(decode).or(blink))
         .run(([0, 0, 0, 0], args.port))
